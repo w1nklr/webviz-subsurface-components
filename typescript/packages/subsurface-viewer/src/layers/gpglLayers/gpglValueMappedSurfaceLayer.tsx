@@ -20,9 +20,9 @@ import type { Material } from "../gpglLayers/typeDefs";
 
 import type {
     DeckGLLayerContext,
-    ExtendedLayerProps,
     LayerPickInfo,
     PropertyDataType,
+    TypeAndNameLayerProps,
 } from "../utils/layerTools";
 import { createPropertyData } from "../utils/layerTools";
 import {
@@ -107,9 +107,13 @@ export type TriangleMeshProps = {
  * with value-mapped textures, optional triangle meshes, and various rendering options such as
  * shading, lighting, and depth testing.
  */
-export interface GpglValueMappedSurfaceLayerProps extends ExtendedLayerProps {
+export interface GpglValueMappedSurfaceLayerProps
+    extends TypeAndNameLayerProps,
+        LayerProps {
     /** Surfaces with a value map used as texture. */
-    valueMappedTriangles: ValueMappedTriangleProps[];
+    valueMappedTriangles:
+        | ValueMappedTriangleProps[]
+        | Promise<ValueMappedTriangleProps[]>;
     /** Optional triangle meshes. Inferred from `valueMappedTriangles` if not specified. */
     triangleMeshes: TriangleMeshProps[];
     /** Whether to display the mesh overlay. */
@@ -166,7 +170,8 @@ const defaultProps: DefaultProps<GpglValueMappedSurfaceLayerProps> = {
     "@@type": "GpglValueMappedSurfaceLayer",
     name: "Value Mapped Surface Layer",
     id: "value-mapped-surface",
-    data: ["dummy"],
+    //data: { type: "image", value: null, async: true },
+    valueMappedTriangles: { type: "object", value: [], async: true },
     showMesh: false,
     colormap: {
         colormapName: "seismic",
@@ -183,6 +188,98 @@ const defaultProps: DefaultProps<GpglValueMappedSurfaceLayerProps> = {
     pickable: true,
 };
 
+async function loadValueMappedTrgls(trgls: ValueMappedTriangleProps) {
+    // mandatory properties
+    if (typeof trgls.vertices === "string") {
+        trgls.vertices = await loadDataArray(trgls.vertices, Float32Array);
+    }
+    if (typeof trgls.vertexIndices.value === "string") {
+        trgls.vertexIndices.value = await loadDataArray(
+            trgls.vertexIndices.value,
+            Uint32Array
+        );
+    }
+    // optional properties
+    if (typeof trgls.valueMap?.values === "string") {
+        trgls.valueMap.values = await loadDataArray(
+            trgls.valueMap.values,
+            Float32Array
+        );
+    }
+    if (typeof trgls.normals === "string") {
+        trgls.normals = await loadDataArray(trgls.normals, Float32Array);
+    }
+    if (typeof trgls.texCoords === "string") {
+        trgls.texCoords = await loadDataArray(trgls.texCoords, Float32Array);
+    }
+    return trgls;
+}
+
+function loadValueMaps(
+    trgls: ValueMappedTriangleProps[] | Promise<ValueMappedTriangleProps[]>
+): Promise<ValueMappedTriangleProps[]> {
+    if (trgls instanceof Promise) {
+        return trgls;
+    }
+    return Promise.all(
+        trgls.map((trgl) => {
+            return loadValueMappedTrgls(trgl);
+        })
+    );
+}
+
+function isLoaded(
+    trgls: ValueMappedTriangleProps | Promise<ValueMappedTriangleProps>
+): trgls is ValueMappedTriangleProps {
+    return (
+        !(trgls instanceof Promise) &&
+        // mandatory properties
+        trgls.vertices &&
+        typeof trgls.vertices !== "string" &&
+        trgls.vertexIndices.value &&
+        typeof trgls.vertexIndices.value !== "string" &&
+        // optional properties
+        (!trgls.valueMap?.values ||
+            typeof trgls.valueMap.values !== "string") &&
+        (!trgls.normals || typeof trgls.normals !== "string") &&
+        (!trgls.texCoords || typeof trgls.texCoords !== "string")
+    );
+}
+
+/**
+ * Creates an async iterable that yields loaded ValueMappedTriangleProps.
+ * This can be used to process valueMappedTriangles that may contain Promises.
+ *
+ * @param triangles Array of ValueMappedTriangleProps or Promises thereof.
+ * @example
+ * for await (const trgl of asyncValueMappedTriangles(triangles)) {
+ *   // Use trgl here
+ * }
+ */
+// export async function* asyncValueMappedTriangles(
+//     triangles: (ValueMappedTriangleProps | Promise<ValueMappedTriangleProps>)[]
+// ): AsyncIterable<ValueMappedTriangleProps> {
+//     for (const trgl of triangles) {
+//         if (trgl instanceof Promise) {
+//             yield await trgl;
+//         } else if (!isLoaded(trgl)) {
+//             yield await loadedValueMappedTrgls(trgl);
+//         } else {
+//             yield trgl;
+//         }
+//     }
+// }
+
+// type TLocalProps = Omit<
+//     GpglValueMappedSurfaceLayerProps,
+//     "valueMappedTriangles"
+// > & {
+//     valueMappedTriangles:
+//         | AsyncIterable<ValueMappedTriangleProps>
+//         | (ValueMappedTriangleProps | Promise<ValueMappedTriangleProps>)[]
+//         | undefined;
+// };
+
 /**
  * GpglValueMappedSurfaceLayer is a layer handling surfaces textured by a value map.
  * These values are converted to color using a colormap and associated setup.
@@ -191,6 +288,25 @@ const defaultProps: DefaultProps<GpglValueMappedSurfaceLayerProps> = {
  * The surfaces are expected to be small compared to the ones handled by the triangles layer.
  */
 export class GpglValueMappedSurfaceLayer extends Layer<GpglValueMappedSurfaceLayerProps> {
+    constructor(props: Partial<GpglValueMappedSurfaceLayerProps>) {
+        const superProps = {
+            ...props,
+            //data: props.valueMappedTriangles?.at(0)?.valueMap?.values,
+            //fetch: (url: string) => loadDataArray(url, Float32Array),
+            valueMappedTriangles: loadValueMaps(
+                props.valueMappedTriangles ?? []
+            ),
+            // props.valueMappedTriangles?.map((trgls) => {
+            //     return trgls instanceof Promise || isLoaded(trgls)
+            //         ? trgls
+            //         : loadedValueMappedTrgls(trgls);
+            // }) ?? [],
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            //fetch: loadValueMaps as any,
+        };
+        super(superProps);
+    }
+
     setShaderModuleProps(
         args: Partial<{
             [x: string]: Partial<Record<string, unknown> | undefined>;
@@ -216,11 +332,10 @@ export class GpglValueMappedSurfaceLayer extends Layer<GpglValueMappedSurfaceLay
 
     initializeState(context: DeckGLLayerContext): void {
         const gl = context.device;
-        this._createModels(gl).then(([triangleModels, meshModels]) => {
-            this.setState({
-                triangleModels: triangleModels,
-                meshModels: meshModels,
-            });
+        const [triangleModels, meshModels] = this._createModels(gl);
+        this.setState({
+            triangleModels: triangleModels,
+            meshModels: meshModels,
         });
     }
 
@@ -279,27 +394,21 @@ export class GpglValueMappedSurfaceLayer extends Layer<GpglValueMappedSurfaceLay
         });
     }
 
-    private async _createValuesTexture(
+    private _createValuesTexture(
         device: Device,
         valueMap: ValueArray2D | undefined
-    ): Promise<Texture | undefined> {
-        if (valueMap?.values === undefined) {
-            return undefined;
-        }
-
-        // fetch data
-        const propertiesData = await loadDataArray(
-            valueMap.values,
-            Float32Array
-        );
-        if (!propertiesData) {
+    ): Texture | undefined {
+        if (
+            valueMap?.values === undefined ||
+            !(valueMap?.values instanceof Float32Array)
+        ) {
             return undefined;
         }
 
         if (!this.props.colormapSetup?.valueRange) {
             let min = Infinity;
             let max = -Infinity;
-            for (const x of propertiesData) {
+            for (const x of valueMap.values) {
                 min = x < min ? x : min;
                 max = x > max ? x : max;
             }
@@ -323,59 +432,63 @@ export class GpglValueMappedSurfaceLayer extends Layer<GpglValueMappedSurfaceLay
             ...textureProps,
             width: valueMap.width,
             height: valueMap.height,
-            data: propertiesData,
+            data: valueMap.values,
         });
     }
 
-    private async _createModels(device: Device): Promise<[Model[], Model[]]> {
+    private _createModels(device: Device): [Model[], Model[]] {
         const models: Model[] = [];
         const meshModels: Model[] = [];
 
-        // Collect promises for all valueMappedTriangles
-        const triangleModelPromises =
-            this.props.valueMappedTriangles?.map(async (texturedTrgs, i) => {
+        // Not ready yet
+        if (this.props.valueMappedTriangles instanceof Promise) {
+            return [[], []];
+        }
+
+        let i = 0;
+        for (const texturedTrgls of this.props.valueMappedTriangles) {
+            if (isLoaded(texturedTrgls)) {
+                const vertices = toTypedArray(
+                    texturedTrgls.vertices,
+                    Float32Array
+                );
+
                 const trglGeometry: GeometryProps = {
-                    topology: texturedTrgs.topology,
+                    topology: texturedTrgls.topology,
                     attributes: {
                         positions: {
-                            value: await loadDataArray(
-                                texturedTrgs.vertices,
-                                Float32Array
-                            ),
+                            value: vertices,
                             size: 3,
                         },
                         normals: {
-                            value: await loadDataArray(
-                                texturedTrgs.normals ?? [],
+                            value: toTypedArray(
+                                texturedTrgls.normals ?? [],
                                 Float32Array
                             ),
                             size: 3,
                         },
                         texCoords: {
-                            value: await loadDataArray(
-                                texturedTrgs.texCoords ?? [],
+                            value: toTypedArray(
+                                texturedTrgls.texCoords ?? [],
                                 Float32Array
                             ),
                             size: 2,
                         },
                     },
-                    vertexCount: texturedTrgs.vertexIndices.size,
+                    vertexCount: texturedTrgls.vertexIndices.size,
                     indices: {
-                        value: await loadDataArray(
-                            texturedTrgs.vertexIndices.value,
+                        value: toTypedArray(
+                            texturedTrgls.vertexIndices.value,
                             Uint32Array
                         ),
                         size: 1,
                     },
                 };
-                const colormap = texturedTrgs.valueMap
+                const colormap = texturedTrgls.valueMap
                     ? this._createColormapTexture(device, this.props.colormap)
                     : undefined;
-                const floatValues = texturedTrgs.valueMap
-                    ? await this._createValuesTexture(
-                          device,
-                          texturedTrgs.valueMap
-                      )
+                const floatValues = texturedTrgls.valueMap
+                    ? this._createValuesTexture(device, texturedTrgls.valueMap)
                     : undefined;
                 const bindings =
                     colormap && floatValues
@@ -389,44 +502,42 @@ export class GpglValueMappedSurfaceLayer extends Layer<GpglValueMappedSurfaceLay
                     ? texTrianglesUniforms
                     : trianglesUniforms;
 
-                const model = new Model(device, {
-                    id: `${this.props.id}-trgl-${i}`,
-                    ...super.getShaders({
-                        vs: vs,
-                        fs: fs,
-                        modules: [
-                            project32,
-                            picking,
-                            lighting,
-                            phongMaterial,
-                            uniforms,
-                            precisionForTests,
-                            utilities,
-                        ],
-                    }),
-                    bufferLayout:
-                        this.getAttributeManager()!.getBufferLayouts(),
-                    geometry: new Geometry(trglGeometry),
-                    bindings: bindings,
+                models.push(
+                    new Model(device, {
+                        id: `${this.props.id}-trgl-${i++}`,
+                        ...super.getShaders({
+                            vs: vs,
+                            fs: fs,
+                            modules: [
+                                project32,
+                                picking,
+                                lighting,
+                                phongMaterial,
+                                uniforms,
+                                precisionForTests,
+                                utilities,
+                            ],
+                        }),
+                        bufferLayout:
+                            this.getAttributeManager()!.getBufferLayouts(),
+                        geometry: new Geometry(trglGeometry),
+                        bindings: bindings,
 
-                    isInstanced: false, // This only works when set to false.});
-                });
+                        isInstanced: false, // This only works when set to false.});
+                    })
+                );
 
                 // default mesh model if none if provided
-                let meshModel: Model | undefined = undefined;
                 if (!this.props.triangleMeshes?.length && this.props.showMesh) {
                     const indices = computeMeshIndices(
-                        texturedTrgs.vertexIndices.value,
-                        texturedTrgs.topology
+                        texturedTrgls.vertexIndices.value,
+                        texturedTrgls.topology
                     );
                     const meshGeometry: GeometryProps = {
-                        topology: meshTopology(texturedTrgs.topology),
+                        topology: meshTopology(texturedTrgls.topology),
                         attributes: {
                             positions: {
-                                value: toTypedArray(
-                                    texturedTrgs.vertices,
-                                    Float32Array
-                                ),
+                                value: vertices,
                                 size: 3,
                             },
                         },
@@ -436,77 +547,78 @@ export class GpglValueMappedSurfaceLayer extends Layer<GpglValueMappedSurfaceLay
                             size: 1,
                         },
                     };
-                    meshModel = new Model(device, {
-                        id: `${this.props.id}-mesh-line-${i}`,
-                        ...super.getShaders({
-                            vs: vsLineShader,
-                            fs: fsLineShader,
-                            modules: [
-                                project32,
-                                picking,
-                                triangleMeshUniforms,
-                                precisionForTests,
-                            ],
-                        }),
-                        bufferLayout:
-                            this.getAttributeManager()!.getBufferLayouts(),
-                        geometry: new Geometry(meshGeometry),
+                    meshModels.push(
+                        new Model(device, {
+                            id: `${this.props.id}-mesh-line-${i}`,
+                            ...super.getShaders({
+                                vs: vsLineShader,
+                                fs: fsLineShader,
+                                modules: [
+                                    project32,
+                                    picking,
+                                    triangleMeshUniforms,
+                                    precisionForTests,
+                                ],
+                            }),
+                            bufferLayout:
+                                this.getAttributeManager()!.getBufferLayouts(),
+                            geometry: new Geometry(meshGeometry),
 
-                        isInstanced: false, // This only works when set to false.});
-                    });
+                            isInstanced: false, // This only works when set to false.});
+                        })
+                    );
                 }
-                return { model, meshModel };
-            }) ?? [];
-
-        // Await all promises and push to models/meshModels arrays
-        const triangleResults = await Promise.all(triangleModelPromises);
-        triangleResults.forEach(({ model, meshModel }) => {
-            models.push(model);
-            if (meshModel) {
-                meshModels.push(meshModel);
             }
-        });
+        }
 
-        this.props.triangleMeshes?.forEach((mesh, i) => {
-            const meshGeometry: GeometryProps = {
-                topology: mesh.topology,
-                attributes: {
-                    positions: {
-                        value: toTypedArray(
-                            mesh.vertices ??
-                                this.props.valueMappedTriangles[i]?.vertices,
-                            Float32Array
-                        ),
-                        size: 3,
-                    },
-                },
-                vertexCount: mesh.vertexIndices.size,
-                indices: {
-                    value: toTypedArray(mesh.vertexIndices.value, Uint32Array),
-                    size: 1,
-                },
-            };
-            meshModels.push(
-                new Model(device, {
-                    id: `${this.props.id}-mesh-line-${i}`,
-                    ...super.getShaders({
-                        vs: vsLineShader,
-                        fs: fsLineShader,
-                        modules: [
-                            project32,
-                            picking,
-                            triangleMeshUniforms,
-                            precisionForTests,
-                        ],
-                    }),
-                    bufferLayout:
-                        this.getAttributeManager()!.getBufferLayouts(),
-                    geometry: new Geometry(meshGeometry),
+        if (this.props.showMesh && this.props.triangleMeshes) {
+            i = 0;
+            for (const mesh of this.props.triangleMeshes) {
+                const texturedTrgls = this.props.valueMappedTriangles[i];
+                if (isLoaded(texturedTrgls)) {
+                    const meshGeometry: GeometryProps = {
+                        topology: mesh.topology,
+                        attributes: {
+                            positions: {
+                                value: toTypedArray(
+                                    mesh.vertices ?? texturedTrgls?.vertices,
+                                    Float32Array
+                                ),
+                                size: 3,
+                            },
+                        },
+                        vertexCount: mesh.vertexIndices.size,
+                        indices: {
+                            value: toTypedArray(
+                                mesh.vertexIndices.value,
+                                Uint32Array
+                            ),
+                            size: 1,
+                        },
+                    };
+                    meshModels.push(
+                        new Model(device, {
+                            id: `${this.props.id}-mesh-line-${i}`,
+                            ...super.getShaders({
+                                vs: vsLineShader,
+                                fs: fsLineShader,
+                                modules: [
+                                    project32,
+                                    picking,
+                                    triangleMeshUniforms,
+                                    precisionForTests,
+                                ],
+                            }),
+                            bufferLayout:
+                                this.getAttributeManager()!.getBufferLayouts(),
+                            geometry: new Geometry(meshGeometry),
 
-                    isInstanced: false, // This only works when set to false.});
-                })
-            );
-        });
+                            isInstanced: false, // This only works when set to false.});
+                        })
+                    );
+                }
+            }
+        }
 
         return [models, meshModels];
     }

@@ -26,6 +26,12 @@ import fsColormap from "./colormap.fs.glsl";
 
 import { precisionForTests } from "../shader_modules/test-precision/precisionForTests";
 
+type HeightMap = {
+    width: number;
+    height: number;
+    data: Uint8Array;
+};
+
 // Most props are inherited from DeckGL's BitmapLayer. For a full list, see
 // https://deck.gl/docs/api-reference/layers/bitmap-layer
 //
@@ -87,7 +93,7 @@ export interface ColormapLayerProps
     colorMapClampColor: Color | undefined | boolean;
 
     // Optional height map. If set hillshading and contourlines will be based on this map.
-    heightMapUrl: string;
+    heightMapUrl: string | HeightMap | Promise<HeightMap>;
 
     // Min and max values of optional height map.
     // Defaults to "valueRange".
@@ -118,66 +124,100 @@ const defaultProps = {
     hillshading: false,
     contourReferencePoint: 0,
     contourInterval: 50, // 50 meter by default
-    heightMapUrl: "",
+    heightMapUrl: { type: "object", value: null, async: true },
 };
 
+async function loadHeightMap(
+    url: string | HeightMap | Promise<HeightMap>
+): Promise<HeightMap> {
+    if (url instanceof Promise) {
+        return url;
+    }
+    if (typeof url !== "string") {
+        return url;
+    }
+    const response = await global.fetch(url);
+    if (!response.ok) {
+        console.error("Could not load ", url);
+    } else {
+        const blob = await response.blob();
+        const contentType = response.headers.get("content-type");
+        const isPng = contentType === "image/png";
+        if (isPng) {
+            const heightMapTexture = await new Promise<HeightMap>((resolve) => {
+                const fileReader = new FileReader();
+                fileReader.readAsArrayBuffer(blob);
+                fileReader.onload = () => {
+                    const arrayBuffer = fileReader.result;
+                    const imgData = png.decode(arrayBuffer as ArrayBuffer);
+                    const data = imgData.data; // array of int's
+                    const n = data.length;
+                    const buffer = new ArrayBuffer(n);
+                    const view = new DataView(buffer);
+                    for (let i = 0; i < n; i++) {
+                        view.setUint8(i, data[i]);
+                    }
+
+                    const array = new Uint8Array(buffer);
+                    resolve({
+                        data: array,
+                        width: imgData.width,
+                        height: imgData.height,
+                    });
+                };
+            });
+            return heightMapTexture;
+        }
+    }
+    return {
+        data: new Uint8Array([]),
+        width: 0,
+        height: 0,
+    };
+}
+
 export default class ColormapLayer extends BitmapLayer<ColormapLayerProps> {
+    constructor(props: Partial<ColormapLayerProps>) {
+        const superProps = {
+            ...props,
+            heightMapUrl: loadHeightMap(props.heightMapUrl ?? ""),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            //fetch: loadHeightMap as any,
+        };
+        super(superProps);
+    }
+
     initializeState(): void {
         super.initializeState();
 
-        const createPropertyTexture = async () => {
-            const response = await fetch(this.props.heightMapUrl);
-            if (!response.ok) {
-                console.error("Could not load ", this.props.heightMapUrl);
-            } else {
-                const blob = await response.blob();
-                const contentType = response.headers.get("content-type");
-                const isPng = contentType === "image/png";
-                if (isPng) {
-                    const heightMapTexture = await new Promise((resolve) => {
-                        const fileReader = new FileReader();
-                        fileReader.readAsArrayBuffer(blob);
-                        fileReader.onload = () => {
-                            const arrayBuffer = fileReader.result;
-                            const imgData = png.decode(
-                                arrayBuffer as ArrayBuffer
-                            );
-                            const w = imgData.width;
-                            const h = imgData.height;
+        if (
+            this.props.heightMapUrl &&
+            typeof this.props.heightMapUrl !== "string" &&
+            !(this.props.heightMapUrl instanceof Promise) &&
+            this.props.heightMapUrl.data &&
+            this.props.heightMapUrl.width > 1 &&
+            this.props.heightMapUrl.height > 1
+        ) {
+            // eslint-disable-next-line
+            // @ts-ignore
+            const heightMapTexture = this.context.device.createTexture({
+                sampler: {
+                    addressModeU: "clamp-to-edge",
+                    addressModeV: "clamp-to-edge",
+                    minFilter: "linear",
+                    magFilter: "linear",
+                },
+                width: this.props.heightMapUrl.width,
+                height: this.props.heightMapUrl.height,
+                format: "rgba8unorm",
+                data: this.props.heightMapUrl.data,
+            });
 
-                            const data = imgData.data; // array of int's
-                            const n = data.length;
-                            const buffer = new ArrayBuffer(n);
-                            const view = new DataView(buffer);
-                            for (let i = 0; i < n; i++) {
-                                view.setUint8(i, data[i]);
-                            }
-
-                            const array = new Uint8Array(buffer);
-                            const propertyTexture =
-                                this.context.device.createTexture({
-                                    sampler: {
-                                        addressModeU: "clamp-to-edge",
-                                        addressModeV: "clamp-to-edge",
-                                        minFilter: "linear",
-                                        magFilter: "linear",
-                                    },
-                                    width: w,
-                                    height: h,
-                                    format: "rgba8unorm",
-                                    data: array as Uint8Array,
-                                });
-                            resolve(propertyTexture);
-                        };
-                    });
-                    this.setState({
-                        ...this.state,
-                        heightMapTexture,
-                    });
-                }
-            }
-        };
-        createPropertyTexture();
+            this.setState({
+                ...this.state,
+                heightMapTexture,
+            });
+        }
     }
 
     setShaderModuleProps(
