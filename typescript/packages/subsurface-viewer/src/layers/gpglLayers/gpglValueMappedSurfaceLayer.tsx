@@ -171,7 +171,7 @@ const defaultProps: DefaultProps<GpglValueMappedSurfaceLayerProps> = {
     name: "Value Mapped Surface Layer",
     id: "value-mapped-surface",
     //data: { type: "image", value: null, async: true },
-    valueMappedTriangles: { type: "object", value: [], async: true },
+    valueMappedTriangles: { type: "data", value: [], async: true },
     showMesh: false,
     colormap: {
         colormapName: "seismic",

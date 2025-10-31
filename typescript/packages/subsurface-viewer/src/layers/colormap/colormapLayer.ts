@@ -124,7 +124,7 @@ const defaultProps = {
     hillshading: false,
     contourReferencePoint: 0,
     contourInterval: 50, // 50 meter by default
-    heightMapUrl: { type: "object", value: null, async: true },
+    heightMapUrl: { type: "data", value: null, async: true },
 };
 
 async function loadHeightMap(
