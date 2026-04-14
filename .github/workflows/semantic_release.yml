@@ -11,7 +11,7 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    #Inspired by 
+    # Inspired by https://github.com/semantic-release/semantic-release/blob/master/docs/recipes/ci-configurations/github-actions.md
     permissions:
       contents: write # to be able to publish a GitHub release
       issues: write # to be able to comment on released issues
