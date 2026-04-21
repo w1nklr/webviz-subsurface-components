@@ -3,7 +3,10 @@ import React, { Component } from "react";
 
 import PropTypes from "prop-types";
 
+import type { LogViewer } from "@equinor/videx-wellog";
+
 import WellLogSpacer from "./components/WellLogSpacer";
+import type { WellLogSpacerOptions } from "./components/WellLogSpacer";
 import WellLogViewWithScroller from "./components/WellLogViewWithScroller";
 
 import { CallbackManager } from "./components/CallbackManager";
@@ -14,38 +17,38 @@ import defaultLayout from "./components/DefaultSyncLogViewerLayout";
 
 import type { WellLogSet } from "./components/WellLogTypes";
 import type { Template } from "./components/WellLogTemplateTypes";
-import type { ColormapFunction } from "./utils/color-function";
-import { ColorFunctionType } from "./components/CommonPropTypes";
-import type { PatternsTable, Pattern } from "./utils/pattern";
-import { PatternsTableType, PatternsType } from "./components/CommonPropTypes";
-import type {
-    WellLogController,
-    WellPickProps,
-} from "./components/WellLogView";
-import { WellPickPropsType } from "./components/WellLogView";
+import {
+    ColorFunctionType,
+    PatternsTableType,
+    PatternsType,
+} from "./components/CommonPropTypes";
 
 import type WellLogView from "./components/WellLogView";
 import type {
+    WellLogController,
+    WellPickProps,
     WellLogViewOptions,
     TrackMouseEvent,
 } from "./components/WellLogView";
-import type { WellLogSpacerOptions } from "./components/WellLogSpacer";
-import { getWellPicks } from "./components/WellLogView";
+import { WellPickPropsType, getWellPicks } from "./components/WellLogView";
 
-import { toggleId } from "./utils/arrays";
+import type { ColormapFunction } from "./utils/color-function";
+import type { PatternsTable, Pattern } from "./utils/pattern";
 import { getAvailableAxes } from "./utils/well-log";
 
 import { checkMinMax } from "./utils/minmax";
 
 import { onTrackMouseEventDefault } from "./utils/edit-track";
 
+import { fillInfos } from "./utils/fill-info";
 import type { Info, InfoOptions } from "./components/InfoTypes";
 
-import { isEqDomains } from "./utils/arrays";
-import { isEqualRanges } from "./utils/arrays";
-import type { LogViewer } from "@equinor/videx-wellog";
-import { fillInfos } from "./utils/fill-info";
-import { isEqualArrays } from "./utils/arrays";
+import {
+    isEqDomains,
+    isEqualArrays,
+    isEqualRanges,
+    toggleId,
+} from "./utils/arrays";
 
 export type WellDistances = {
     units: string;
@@ -487,7 +490,7 @@ class SyncLogViewer extends Component<SyncLogViewerProps, State> {
         this.callbackManagers.length = nViews;
 
         for (let iView = nViews; iView < this.controllers.length; iView++) {
-            console.assert(this.controllers[iView]);
+            console.assert(!!this.controllers[iView]);
             this.onDeleteController(iView, this.controllers[iView]);
         }
         this.controllers.length = nViews;
