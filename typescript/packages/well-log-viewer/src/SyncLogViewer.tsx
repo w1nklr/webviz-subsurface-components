@@ -110,7 +110,7 @@ export interface SyncLogViewerProps {
      */
     spacers?: boolean | number | number[];
     /**
-     * Distanses between wells to show on the spacers
+     * Distances between wells to show on the spacers
      */
     wellDistances?: WellDistances;
 
@@ -119,7 +119,13 @@ export interface SyncLogViewerProps {
      */
     horizontal?: boolean;
     syncTrackPos?: boolean;
+    /**
+     * Synchronize visible content domain (pan and zoom) across all the tracks in the views.
+     */
     syncContentDomain?: boolean;
+    /**
+     * Synchronize selected content across all the tracks in the views.
+     */
     syncContentSelection?: boolean;
     syncTemplate?: boolean;
 
@@ -139,14 +145,18 @@ export interface SyncLogViewerProps {
     axisMnemos: Record<string, string[]>;
 
     /**
-     * Initial visible range
+     * Initial visible range. A single domain applies to all the tracks,
+     * an array of domains applies to the tracks in corresponding views.
      */
-    domain?: [number, number];
+    domain?: [number, number] | [number, number][];
 
     /**
-     * Initial selected range
+     * Initial selected range. A single selection applies to all the tracks,
+     * an array of selections applies to the tracks in corresponding views.
      */
-    selection?: [number | undefined, number | undefined];
+    selection?:
+        | [number | undefined, number | undefined]
+        | [number | undefined, number | undefined][];
 
     /**
      * Options for well log views
@@ -195,7 +205,7 @@ export interface SyncLogViewerProps {
 export const argTypesSyncLogViewerProp = {
     welllogs: {
         description:
-            "Array of JSON objects describing well log data.\n<i>Depreacted — Use <b>wellLogCollections</b> instead.</i>",
+            "Array of JSON objects describing well log data.\n<i>Deprecated — Use <b>wellLogCollections</b> instead.</i>",
     },
     wellLogCollections: {
         description:
@@ -222,7 +232,7 @@ export const argTypesSyncLogViewerProp = {
             "Set to true or to spacers width or to array of spacer widths if WellLogSpacers should be used",
     },
     wellDistances: {
-        description: "Distanses between wells to show on the spacers",
+        description: "Distances between wells to show on the spacers",
     },
 
     horizontal: {
@@ -309,7 +319,7 @@ class SyncLogViewer extends Component<SyncLogViewerProps, State> {
     }[];
 
     collapsedTrackIds: (string | number)[][];
-    controllers: WellLogController[]; // for onDeletecontroller implementation
+    controllers: WellLogController[]; // for onDeleteController implementation
 
     _isMounted: boolean;
     _inInfoGroupClick: number;
@@ -402,7 +412,7 @@ class SyncLogViewer extends Component<SyncLogViewerProps, State> {
 
         if (
             this.props.syncContentDomain !== prevProps.syncContentDomain ||
-            !isEqualRanges(this.props.domain, prevProps.domain)
+            !isEqualDomains(this.props.domain, prevProps.domain)
         ) {
             this.setControllersZoom();
         }
@@ -420,7 +430,7 @@ class SyncLogViewer extends Component<SyncLogViewerProps, State> {
                 this.syncContentScrollPos(0); // force to redraw visible domain
         }
 
-        if (!isEqualRanges(this.props.selection, prevProps.selection)) {
+        if (!isEqualSelections(this.props.selection, prevProps.selection)) {
             this.setControllersSelection();
         }
 
@@ -922,22 +932,32 @@ class SyncLogViewer extends Component<SyncLogViewerProps, State> {
     }
 
     setControllersZoom(): void {
-        for (const callbackManager of this.callbackManagers) {
+        for (const [
+            index,
+            callbackManager,
+        ] of this.callbackManagers.entries()) {
             const controller = callbackManager?.controller;
             if (!controller) continue;
-            if (this.props.domain) {
-                controller.zoomContentTo(this.props.domain);
+            const domain = getDomain(this.props.domain, index);
+            if (domain) {
+                controller.zoomContentTo(domain);
                 //this.forceUpdate();
-                if (this.props.syncContentDomain) break; // Set the domain only to the first controllers. Another controllers should be set by syncContentDomain or wellpickFlatting options
+                if (this.props.syncContentDomain) break; // Set the domain only to the first controllers. Other controllers should be set by syncContentDomain or wellpickFlatting options
             }
         }
     }
     setControllersSelection(): void {
         if (!this.props.selection) return;
-        for (const callbackManager of this.callbackManagers) {
+        for (const [
+            index,
+            callbackManager,
+        ] of this.callbackManagers.entries()) {
             const controller = callbackManager?.controller;
             if (!controller) continue;
-            controller.selectContent(this.props.selection);
+            const selection = getSelection(this.props.selection, index);
+            if (selection) {
+                controller.selectContent(selection);
+            }
         }
         for (const spacer of this.spacers) {
             if (!spacer) continue;
@@ -972,8 +992,8 @@ class SyncLogViewer extends Component<SyncLogViewerProps, State> {
                 horizontal={this.props.horizontal}
                 axisTitles={this.props.axisTitles}
                 axisMnemos={this.props.axisMnemos}
-                domain={this.props.domain}
-                selection={this.props.selection}
+                domain={getDomain(this.props.domain, index)}
+                selection={getSelection(this.props.selection, index)}
                 primaryAxis={this.state.primaryAxis}
                 options={options}
                 // callbacks
@@ -1086,6 +1106,117 @@ function getWellLogCollectionsFromProps(props: SyncLogViewerProps) {
         if (Array.isArray(setOrCollection)) return setOrCollection;
         else return [setOrCollection];
     });
+}
+
+/**
+ * Retrieves the domain range for a specific index from the provided domain configuration.
+ *
+ * @param domain - The domain configuration, which can be either a single [min, max] tuple
+ *                 applicable to all indices, or an array of [min, max] tuples, one for each index.
+ * @param index - The index to retrieve the domain for. Only used if domain is an array of tuples.
+ * @returns A [min, max] tuple representing the domain range, or undefined if the domain
+ *          configuration is invalid or the index is out of bounds.
+ */
+function getDomain(
+    domain: SyncLogViewerProps["domain"],
+    index: number
+): [number, number] | undefined {
+    if (Array.isArray(domain)) {
+        if (Array.isArray(domain[0])) {
+            return domain[index] as [number, number] | undefined;
+        } else {
+            return domain as [number, number];
+        }
+    }
+    return undefined;
+}
+
+/**
+ * Compares two domain props for structural and value equality.
+ *
+ * Supports both accepted domain shapes:
+ * - A single [min, max] tuple used by all views.
+ * - An array of [min, max] tuples used per view.
+ *
+ * @param domain1 - First domain value to compare.
+ * @param domain2 - Second domain value to compare.
+ * @returns True when both domains represent the same ranges, otherwise false.
+ */
+function isEqualDomains(
+    domain1: SyncLogViewerProps["domain"],
+    domain2: SyncLogViewerProps["domain"]
+): boolean {
+    if (domain1 === domain2) return true;
+    if (!domain1 || !domain2) return false;
+    if (typeof domain1 !== typeof domain2) return false;
+    if (typeof domain1[0] === "number") {
+        return isEqualRanges(
+            domain1 as [number, number],
+            domain2 as [number, number]
+        );
+    }
+    return domain1.every((range, index) =>
+        isEqualRanges(
+            range as [number, number],
+            domain2[index] as [number, number]
+        )
+    );
+}
+
+/**
+ * Retrieves the selection range for a specific index from the provided selection configuration.
+ *
+ * @param selection - The selection configuration, either a single [from, to] tuple
+ *                    for all indices or an array of [from, to] tuples per index.
+ * @param index - The index to retrieve the selection for when selection is per-index.
+ * @returns A [from, to] tuple for the requested index, or undefined when unavailable.
+ */
+function getSelection(
+    selection: SyncLogViewerProps["selection"],
+    index: number
+): [number | undefined, number | undefined] | undefined {
+    if (Array.isArray(selection)) {
+        if (Array.isArray(selection[0])) {
+            return selection[index] as
+                | [number | undefined, number | undefined]
+                | undefined;
+        } else {
+            return selection as [number | undefined, number | undefined];
+        }
+    }
+    return undefined;
+}
+
+/**
+ * Compares two selection props for structural and value equality.
+ *
+ * Supports both accepted selection shapes:
+ * - A single [from, to] tuple used by all indices.
+ * - An array of [from, to] tuples used per index.
+ *
+ * @param selection1 - First selection value to compare.
+ * @param selection2 - Second selection value to compare.
+ * @returns True when both selections represent the same ranges, otherwise false.
+ */
+function isEqualSelections(
+    selection1: SyncLogViewerProps["selection"],
+    selection2: SyncLogViewerProps["selection"]
+): boolean {
+    if (selection1 === selection2) return true;
+    if (!selection1 || !selection2) return false;
+    if (typeof selection1 !== typeof selection2) return false;
+    if (typeof selection1[0] === "number" || selection1[0] === undefined) {
+        return isEqualRanges(
+            selection1 as [number | undefined, number | undefined],
+            selection2 as [number | undefined, number | undefined]
+        );
+    }
+    return selection1.every((range, index) =>
+        isEqualRanges(
+            range as [number | undefined, number | undefined],
+            selection2[index] as [number | undefined, number | undefined]
+        )
+    );
 }
 
 ///
