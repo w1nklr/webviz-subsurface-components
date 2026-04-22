@@ -43,6 +43,7 @@ import { onTrackMouseEventDefault } from "./utils/edit-track";
 import { fillInfos } from "./utils/fill-info";
 import type { Info, InfoOptions } from "./components/InfoTypes";
 
+import type { OpenRange, Range } from "./utils/arrayTypes";
 import {
     isEqDomains,
     isEqualArrays,
@@ -151,15 +152,13 @@ export interface SyncLogViewerProps {
      * Initial visible range. A single domain applies to all the tracks,
      * an array of domains applies to the tracks in corresponding views.
      */
-    domain?: [number, number] | [number, number][];
+    domain?: Range | Range[];
 
     /**
      * Initial selected range. A single selection applies to all the tracks,
      * an array of selections applies to the tracks in corresponding views.
      */
-    selection?:
-        | [number | undefined, number | undefined]
-        | [number | undefined, number | undefined][];
+    selection?: OpenRange | OpenRange[];
 
     /**
      * Options for well log views
@@ -655,8 +654,8 @@ class SyncLogViewer extends Component<SyncLogViewerProps, State> {
         }
     }
 
-    getCommonContentBaseDomain(): [number, number] {
-        const commonBaseDomain: [number, number] = [
+    getCommonContentBaseDomain(): Range {
+        const commonBaseDomain: Range = [
             Number.POSITIVE_INFINITY,
             Number.NEGATIVE_INFINITY,
         ];
@@ -674,8 +673,7 @@ class SyncLogViewer extends Component<SyncLogViewerProps, State> {
             !(this.props.wellpickFlatting && this.props.wellpicks) &&
             this.props.syncContentDomain
         ) {
-            const commonBaseDomain: [number, number] =
-                this.getCommonContentBaseDomain();
+            const commonBaseDomain: Range = this.getCommonContentBaseDomain();
             for (const callbackManager of this.callbackManagers) {
                 const controller = callbackManager?.controller;
                 if (!controller) continue;
@@ -692,7 +690,7 @@ class SyncLogViewer extends Component<SyncLogViewerProps, State> {
     makeFlattingCoeffs(): {
         A: number[][];
         B: number[][];
-        newBaseDomain: [number, number][]; // not used
+        newBaseDomain: Range[]; // not used
     } {
         const wellpickFlatting = this.props.wellpickFlatting;
         if (!wellpickFlatting) return { A: [], B: [], newBaseDomain: [] };
@@ -701,7 +699,7 @@ class SyncLogViewer extends Component<SyncLogViewerProps, State> {
         const flattingB: number[][] = [];
 
         const nView = this.callbackManagers.length;
-        const newBaseDomain: [number, number][] = [];
+        const newBaseDomain: Range[] = [];
         for (let i = 0; i < nView; i++) {
             newBaseDomain.push([
                 Number.POSITIVE_INFINITY,
@@ -777,7 +775,7 @@ class SyncLogViewer extends Component<SyncLogViewerProps, State> {
                     _flattingB.push(b);
 
                     const baseDomain = controller.getContentBaseDomain();
-                    const baseDomainNew: [number, number] = [
+                    const baseDomainNew: Range = [
                         a * baseDomain[0] + b,
                         a * baseDomain[1] + b,
                     ];
@@ -812,7 +810,7 @@ class SyncLogViewer extends Component<SyncLogViewerProps, State> {
         let coeff: {
             A: number[][];
             B: number[][];
-            newBaseDomain: [number, number][];
+            newBaseDomain: Range[];
         } | null = null;
         if (this.props.wellpicks && wellpickFlatting)
             coeff = this.makeFlattingCoeffs();
@@ -837,7 +835,7 @@ class SyncLogViewer extends Component<SyncLogViewerProps, State> {
                     const a = coeff.A[iWellLog][j];
                     const b = coeff.B[iWellLog][j];
 
-                    const domainNew: [number, number] = [
+                    const domainNew: Range = [
                         a * domain[0] + b,
                         a * domain[1] + b,
                     ];
@@ -856,7 +854,7 @@ class SyncLogViewer extends Component<SyncLogViewerProps, State> {
                         // sync scroll bar: not work yet
                         const baseDomain = _controller.getContentBaseDomain();
                         //const newBaseDomain = coeff.newBaseDomain[j];
-                        const newBaseDomain: [number, number] = [
+                        const newBaseDomain: Range = [
                             domainNew[0],
                             domainNew[1],
                         ];
@@ -1123,12 +1121,12 @@ function getWellLogCollectionsFromProps(props: SyncLogViewerProps) {
 function getDomain(
     domain: SyncLogViewerProps["domain"],
     index: number
-): [number, number] | undefined {
+): Range | undefined {
     if (Array.isArray(domain)) {
         if (Array.isArray(domain[0])) {
-            return domain[index] as [number, number] | undefined;
+            return domain[index] as Range | undefined;
         } else {
-            return domain as [number, number];
+            return domain as Range;
         }
     }
     return undefined;
@@ -1153,16 +1151,10 @@ function isEqualDomains(
     if (!domain1 || !domain2) return false;
     if (typeof domain1 !== typeof domain2) return false;
     if (typeof domain1[0] === "number") {
-        return isEqualRanges(
-            domain1 as [number, number],
-            domain2 as [number, number]
-        );
+        return isEqualRanges(domain1 as Range, domain2 as Range);
     }
     return domain1.every((range, index) =>
-        isEqualRanges(
-            range as [number, number],
-            domain2[index] as [number, number]
-        )
+        isEqualRanges(range as Range, domain2[index] as Range)
     );
 }
 
@@ -1177,14 +1169,12 @@ function isEqualDomains(
 function getSelection(
     selection: SyncLogViewerProps["selection"],
     index: number
-): [number | undefined, number | undefined] | undefined {
+): OpenRange | undefined {
     if (Array.isArray(selection)) {
         if (Array.isArray(selection[0])) {
-            return selection[index] as
-                | [number | undefined, number | undefined]
-                | undefined;
+            return selection[index] as OpenRange | undefined;
         } else {
-            return selection as [number | undefined, number | undefined];
+            return selection as OpenRange;
         }
     }
     return undefined;
@@ -1209,16 +1199,10 @@ function isEqualSelections(
     if (!selection1 || !selection2) return false;
     if (typeof selection1 !== typeof selection2) return false;
     if (typeof selection1[0] === "number" || selection1[0] === undefined) {
-        return isEqualRanges(
-            selection1 as [number | undefined, number | undefined],
-            selection2 as [number | undefined, number | undefined]
-        );
+        return isEqualRanges(selection1 as OpenRange, selection2 as OpenRange);
     }
     return selection1.every((range, index) =>
-        isEqualRanges(
-            range as [number | undefined, number | undefined],
-            selection2[index] as [number | undefined, number | undefined]
-        )
+        isEqualRanges(range as OpenRange, selection2[index] as OpenRange)
     );
 }
 
