@@ -1350,12 +1350,18 @@ SyncLogViewer.propTypes = {
     /**
      * Initial visible interval of the log data
      */
-    domain: PropTypes.arrayOf(PropTypes.number),
+    domain: PropTypes.oneOfType([
+        PropTypes.arrayOf(PropTypes.number),
+        PropTypes.arrayOf(PropTypes.arrayOf(PropTypes.number)),
+    ]),
 
     /**
      * Initial selected interval of the log data
      */
-    selection: PropTypes.arrayOf(PropTypes.number),
+    selection: PropTypes.oneOfType([
+        PropTypes.arrayOf(PropTypes.number),
+        PropTypes.arrayOf(PropTypes.arrayOf(PropTypes.number)),
+    ]),
 
     /**
      * Set to true for default titles or to array of individual well log titles
